@@ -91,7 +91,8 @@ public class CustomJdbcMeta extends JdbcMeta {
     }
 
     private PriorityQueue<Map.Entry<Connection, Long>> rankConnections(ConcurrentMap<String, Connection> cacheAsMap) {
-        final Map<Connection, Long> connectionCountMap = cacheAsMap.values().stream().collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+        final Map<Connection, Long> connectionCountMap = cacheAsMap.values().stream()
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
 
         final Set<Map.Entry<Connection, Long>> entries = connectionCountMap.entrySet();
         PriorityQueue<Map.Entry<Connection, Long>> pq =
