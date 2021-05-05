@@ -7,10 +7,10 @@ import javax.sql.DataSource;
 import java.lang.reflect.Field;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public class CustomJdbcMeta extends JdbcMeta {
 
@@ -60,34 +60,78 @@ public class CustomJdbcMeta extends JdbcMeta {
     @Override
     protected Connection createConnection(String url, Properties info) {
 
-        Connection connection;
+        Connection connection = null;
         try {
             connection = dataSource.getConnection();
 
         } catch (SQLException ex) {
-            connection = getSharedConnection();
+            try {
+                connection = getSharedConnection();
+            } catch (IllegalAccessException | NoSuchFieldException e) {
+                e.printStackTrace();
+            }
             return connection;
         }
         return connection;
     }
 
-    private Connection getSharedConnection() {
+    private Connection getSharedConnection() throws IllegalAccessException, NoSuchFieldException {
+        Field fieldConnectionCache;
+
+        fieldConnectionCache = getField("connectionCache");
+        Cache<String, Connection> connectionCache = (Cache<String, Connection>) fieldConnectionCache.get(this);
+        ConcurrentMap<String, Connection> cacheAsMap = connectionCache.asMap();
+
+        if (cacheAsMap != null && !cacheAsMap.isEmpty()) {
+            PriorityQueue<Map.Entry<Connection, Long>> pq = rankConnections(cacheAsMap);
+            Connection connection = Objects.requireNonNull(pq.peek()).getKey();
+            return connection;
+        }
+        return null;
+    }
+
+    private PriorityQueue<Map.Entry<Connection, Long>> rankConnections(ConcurrentMap<String, Connection> cacheAsMap) {
+        final Map<Connection, Long> connectionCountMap = cacheAsMap.values().stream().collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+
+        final Set<Map.Entry<Connection, Long>> entries = connectionCountMap.entrySet();
+        PriorityQueue<Map.Entry<Connection, Long>> pq =
+                new PriorityQueue<>(Comparator.comparingLong(Map.Entry::getValue));
+        pq.addAll(entries);
+        return pq;
+    }
+
+    @Override
+    public void closeConnection(ConnectionHandle ch) {
         Field fieldConnectionCache;
         try {
 
             fieldConnectionCache = getField("connectionCache");
             Cache<String, Connection> connectionCache = (Cache<String, Connection>) fieldConnectionCache.get(this);
-            ConcurrentMap<String, Connection> cacheAsMap = connectionCache.asMap();
-            if (cacheAsMap != null) {
-                int randomId = new Random().nextInt(cacheAsMap.size());
-                Connection loadedConn = cacheAsMap.get(cacheAsMap.keySet().toArray()[randomId]);
-                return loadedConn;
+            Connection conn = connectionCache.getIfPresent(ch.id);
+            if (conn == null) {
+                return;
             }
+            connectionCache.invalidate(ch.id);
 
-        } catch (IllegalAccessException | NoSuchFieldException e) {
+            final ConcurrentMap<String, Connection> cacheAsMap = connectionCache.asMap();
+            boolean isShared = isSharedConnection(conn, cacheAsMap);
+
+            if (!isShared) conn.close();
+
+        } catch (IllegalAccessException | NoSuchFieldException | SQLException e) {
             e.printStackTrace();
         }
-        return null;
+    }
+
+    private boolean isSharedConnection(Connection conn, ConcurrentMap<String, Connection> cacheAsMap) {
+        boolean isSharedConn = false;
+        for (Connection connection : cacheAsMap.values()) {
+            if (Objects.equals(connection, conn)) {
+                isSharedConn = true;
+                break;
+            }
+        }
+        return isSharedConn;
     }
 
     private Field getField(String fieldName) throws NoSuchFieldException {

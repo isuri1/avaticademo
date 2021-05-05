@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
 import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 @Configuration
 public class DataSourceConfig {
@@ -34,7 +35,8 @@ public class DataSourceConfig {
         Properties properties = new Properties();
         properties.put("user", H2_2_USER_NAME);
         properties.put("password", H2_2_PWD);
-        properties.put(JdbcMeta.ConnectionCacheSettings.MAX_CAPACITY.key(), "10");
+        properties.put(JdbcMeta.ConnectionCacheSettings.EXPIRY_DURATION.key(), String.valueOf(Integer.MAX_VALUE));
+        properties.put(JdbcMeta.ConnectionCacheSettings.EXPIRY_UNIT.key(), TimeUnit.DAYS.name());
 
         return properties;
     }
